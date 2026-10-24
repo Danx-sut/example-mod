@@ -15,11 +15,15 @@
         "geode.node-ids": ">=v1.23.3"
     },
     "settings": {
-        "assist-enabled": {
-            "type": "bool",
-            "name": "Activar ayuda",
-            "description": "Enciende o apaga la ayuda de precision.",
-            "default": true
+                "assist-power": {
+            "type": "int",
+            "name": "Potencia de la ayuda (%)",
+            "description": "Multiplica todas las ventanas de ayuda. 100 = normal, 200 = el doble.",
+            "default": 100,
+            "min": 0,
+            "max": 300,
+            "control": { "slider": true }
+        },
         },
         "ground-ms": {
             "type": "int",
