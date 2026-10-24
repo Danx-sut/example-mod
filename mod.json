@@ -1,4 +1,3 @@
-
 {
     "geode": "5.11.2",
     "gd": {
@@ -14,5 +13,16 @@
     "description": "Ayuda de precision para clics",
     "dependencies": {
         "geode.node-ids": ">=v1.23.3"
+    },
+    "settings": {
+        "buffer-frames": {
+            "type": "int",
+            "name": "Ayuda (frames)",
+            "description": "0 = sin ayuda. Mas frames = mas ayuda.",
+            "default": 3,
+            "min": 0,
+            "max": 10,
+            "control": { "slider": true }
+        }
     }
 }
