@@ -1,194 +1,71 @@
 #include <Geode/Geode.hpp>
-#include <Geode/modify/GJBaseGameLayer.hpp>
-#include <Geode/modify/PauseLayer.hpp>
-#include <Geode/modify/PlayLayer.hpp>
-#include <Geode/modify/GJGameLevel.hpp>
+#include <Geode/ui/Popup.hpp>
 #include <Geode/ui/GeodeUI.hpp>
-#include <chrono>
 using namespace geode::prelude;
 
-// Se pone en true cuando la ayuda actua en este intento
-static bool g_assistUsed = false;
+class PrecisionMenu : public Popup {
+protected:
+    bool init() {
+        if (!Popup::init(300.f, 200.f)) return false;
+        this->setTitle("Precision");
 
-static double nowMs() {
-    return std::chrono::duration<double, std::milli>(
-        std::chrono::steady_clock::now().time_since_epoch()
-    ).count();
-}
-
-// Cubo, bola, robot y arana necesitan ayuda; nave, UFO, onda y swing no
-static bool needsAssist(PlayerObject* p) {
-    return !(p->m_isShip || p->m_isBird || p->m_isDart || p->m_isSwing);
-}
-
-static bool touchingRing(PlayerObject* p) {
-    return p->m_touchingRings && p->m_touchingRings->count() > 0;
-}
-
-// El jugador puede actuar ahora: en el suelo o tocando un orbe
-static bool canActNow(PlayerObject* p) {
-    return p->m_isOnGround || touchingRing(p);
-}
-
-class $modify(PrecisionLayer, GJBaseGameLayer) {
-    struct Fields {
-        bool pending = false;
-        bool fingerDown = false;
-        bool replaying = false;
-        bool forceGround = false;
-        bool wasInAir = false;
-        bool clickedSinceGround = false;
-        double groundUntil = 0.0;
-        double orbUntil = 0.0;
-        double releaseAt = 0.0;
-        double leftGroundAt = 0.0;
-    };
-
-    void handleButton(bool down, int button, bool isPlayer1) {
-        bool mine = button == 1 && isPlayer1 && !m_fields->replaying;
-        if (mine) m_fields->fingerDown = down;
-
-        if (mine && down && m_player1) {
-            auto mod = Mod::get();
-            double t = nowMs();
-
-            if (canActNow(m_player1)) {
-                // clic normal: ya salto, no hay correccion tardia
-                m_fields->clickedSinceGround = true;
-            } else if (mod->getSettingValue<bool>("assist-enabled")
-                       && needsAssist(m_player1)) {
-                double power = static_cast<double>(mod->getSettingValue<int64_t>("assist-power")) / 100.0;
-double late = static_cast<double>(mod->getSettingValue<int64_t>("late-ms")) * power;
-double ground = static_cast<double>(mod->getSettingValue<int64_t>("ground-ms")) * power;
-double orb = static_cast<double>(mod->getSettingValue<int64_t>("orb-ms")) * power;
-
-                bool lateOk = late > 0.0
-                    && m_fields->wasInAir
-                    && !m_fields->clickedSinceGround
-                    && (t - m_fields->leftGroundAt) <= late;
-
-                if (lateOk) {
-                    // clic tardio: se aplica el salto como si siguieras en el suelo
-                    m_fields->forceGround = true;
-                    m_fields->clickedSinceGround = true;
-                    g_assistUsed = true;
-                } else if (ground > 0.0 || orb > 0.0) {
-                    // clic temprano: se guarda unos ms
-                    m_fields->pending = true;
-                    m_fields->groundUntil = t + ground;
-                    m_fields->orbUntil = t + orb;
-                }
-            }
-        }
-        GJBaseGameLayer::handleButton(down, button, isPlayer1);
-    }
-
-    void processCommands(float dt, bool isHalfTick, bool isLastTick) {
-        bool forced = m_fields->forceGround && m_player1;
-        if (forced) m_player1->m_isOnGround = true;
-
-        GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
-        m_fields->forceGround = false;
-        if (!m_player1) return;
-
-        double t = nowMs();
         auto mod = Mod::get();
-        bool on = mod->getSettingValue<bool>("assist-enabled");
+        this->addRow("Ayuda de clics", 45.f, 1,
+                     mod->getSettingValue<bool>("assist-enabled"));
+        this->addRow("Bloom (visual)", 10.f, 2,
+                     mod->getSettingValue<bool>("bloom-enabled"));
+        this->addRow("Avisos de ayuda", -25.f, 3,
+                     mod->getSavedValue<bool>("debug-toasts", false));
 
-        // seguimiento del suelo / aire
-        if (forced) {
-            m_fields->wasInAir = true;
-            m_fields->clickedSinceGround = true;
-        } else if (m_player1->m_isOnGround) {
-            if (m_fields->wasInAir) m_fields->clickedSinceGround = false;
-            m_fields->wasInAir = false;
-        } else if (!m_fields->wasInAir) {
-            m_fields->wasInAir = true;
-            m_fields->leftGroundAt = t;
-            // si saltaste por mantener el dedo, no cuenta como caida de plataforma
-            if (m_fields->fingerDown) m_fields->clickedSinceGround = true;
-        }
-
-        // soltar el clic ayudado
-        if (m_fields->releaseAt > 0.0 && t >= m_fields->releaseAt) {
-            m_fields->releaseAt = 0.0;
-            if (!m_fields->fingerDown) {
-                m_fields->replaying = true;
-                GJBaseGameLayer::handleButton(false, 1, true);
-                m_fields->replaying = false;
-            }
-        }
-
-        // clic temprano guardado
-        if (!m_fields->pending) return;
-
-        if (!on || !needsAssist(m_player1)) {
-            m_fields->pending = false;
-            return;
-        }
-
-        bool hitGround = t <= m_fields->groundUntil && m_player1->m_isOnGround;
-        bool hitOrb = t <= m_fields->orbUntil && touchingRing(m_player1);
-
-        if (hitGround || hitOrb) {
-            m_fields->pending = false;
-            if (!m_fields->fingerDown) {
-                m_fields->replaying = true;
-                GJBaseGameLayer::handleButton(true, 1, true);
-                m_fields->replaying = false;
-                m_fields->clickedSinceGround = true;
-                g_assistUsed = true;
-                double robotHold = static_cast<double>(
-                    mod->getSettingValue<int64_t>("robot-hold-ms")
-                );
-                m_fields->releaseAt = t + (m_player1->m_isRobot ? robotHold : 30.0);
-            }
-        } else if (t > m_fields->groundUntil && t > m_fields->orbUntil) {
-            m_fields->pending = false;
-        }
-    }
-};
-
-// Cada intento nuevo empieza sin marca de ayuda
-class $modify(PrecisionPlay, PlayLayer) {
-    void resetLevel() {
-        PlayLayer::resetLevel();
-        g_assistUsed = false;
-    }
-};
-
-// Si se uso la ayuda, no se guarda el progreso normal (la practica si)
-class $modify(PrecisionLevel, GJGameLevel) {
-    void savePercentage(int percent, bool isPracticeMode, int clicks, int attempts, bool isChkValid) {
-        if (g_assistUsed && !isPracticeMode) {
-            Notification::create(
-                "Precision: progreso no guardado (ayuda usada)",
-                NotificationIcon::Warning, 3.f
-            )->show();
-            return;
-        }
-        GJGameLevel::savePercentage(percent, isPracticeMode, clicks, attempts, isChkValid);
-    }
-};
-
-class $modify(PrecisionPause, PauseLayer) {
-    void customSetup() {
-        PauseLayer::customSetup();
-        auto winSize = CCDirector::get()->getWinSize();
-
-        auto sprite = ButtonSprite::create("Precision");
-        sprite->setScale(0.6f);
+        auto sprite = ButtonSprite::create("Mas ajustes");
+        sprite->setScale(0.7f);
         auto btn = CCMenuItemSpriteExtra::create(
-            sprite, this, menu_selector(PrecisionPause::onPrecision)
+            sprite, this, menu_selector(PrecisionMenu::onMore)
         );
-
-        auto menu = CCMenu::create();
-        menu->addChild(btn);
-        menu->setPosition({winSize.width - 60.f, winSize.height - 25.f});
-        this->addChild(menu);
+        m_buttonMenu->addChildAtPosition(btn, Anchor::Center, {0.f, -65.f});
+        return true;
     }
 
-    void onPrecision(CCObject*) {
+    void addRow(const char* text, float y, int tag, bool value) {
+        auto label = CCLabelBMFont::create(text, "bigFont.fnt");
+        label->setScale(0.5f);
+        label->setAnchorPoint({0.f, 0.5f});
+        m_mainLayer->addChildAtPosition(label, Anchor::Center, {-120.f, y});
+
+        auto toggler = CCMenuItemToggler::createWithStandardSprites(
+            this, menu_selector(PrecisionMenu::onToggle), 0.7f
+        );
+        toggler->setTag(tag);
+        toggler->toggle(value);
+        m_buttonMenu->addChildAtPosition(toggler, Anchor::Center, {100.f, y});
+    }
+
+    void onToggle(CCObject* sender) {
+        auto toggler = static_cast<CCMenuItemToggler*>(sender);
+        bool on = !toggler->isToggled();
+        switch (toggler->getTag()) {
+            case 1: Mod::get()->setSettingValue<bool>("assist-enabled", on); break;
+            case 2: Mod::get()->setSettingValue<bool>("bloom-enabled", on); break;
+            case 3: Mod::get()->setSavedValue<bool>("debug-toasts", on); break;
+        }
+    }
+
+    void onMore(CCObject*) {
         openSettingsPopup(Mod::get());
     }
+
+public:
+    static PrecisionMenu* create() {
+        auto ret = new PrecisionMenu();
+        if (ret->init()) {
+            ret->autorelease();
+            return ret;
+        }
+        delete ret;
+        return nullptr;
+    }
 };
+
+void openPrecisionMenu() {
+    if (auto menu = PrecisionMenu::create()) menu->show();
+}
