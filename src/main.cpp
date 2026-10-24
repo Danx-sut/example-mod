@@ -25,8 +25,8 @@ class $modify(PrecisionLayer, GJBaseGameLayer) {
         GJBaseGameLayer::handleButton(down, button, isPlayer1);
     }
 
-    void processCommands(float dt) {
-        GJBaseGameLayer::processCommands(dt);
+    void processCommands(float dt, bool isHalfTick, bool isLastTick) {
+        GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
 
         if (m_fields->releaseIn > 0 && --m_fields->releaseIn == 0 && !m_fields->fingerDown) {
             m_fields->replaying = true;
