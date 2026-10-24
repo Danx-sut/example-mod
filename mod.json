@@ -8,7 +8,7 @@
     },
     "id": "danxsut.precision",
     "name": "Precision",
-    "version": "v1.0.0",
+    "version": "v1.1.0",
     "developer": "Danx-sut",
     "description": "Ayuda de precision para clics",
     "dependencies": {
@@ -21,13 +21,31 @@
             "description": "Enciende o apaga la ayuda de precision.",
             "default": true
         },
-        "buffer-frames": {
+        "ground-frames": {
             "type": "int",
-            "name": "Ayuda (frames)",
-            "description": "0 = sin ayuda. Mas frames = mas ayuda.",
+            "name": "Ayuda en suelo (frames)",
+            "description": "Cuantos frames antes de aterrizar cuenta tu clic. 0 = sin ayuda.",
             "default": 3,
             "min": 0,
             "max": 10,
+            "control": { "slider": true }
+        },
+        "orb-frames": {
+            "type": "int",
+            "name": "Ayuda en orbes (frames)",
+            "description": "Cuantos frames antes de tocar un orbe cuenta tu clic. 0 = sin ayuda.",
+            "default": 3,
+            "min": 0,
+            "max": 10,
+            "control": { "slider": true }
+        },
+        "robot-hold-frames": {
+            "type": "int",
+            "name": "Clic del robot (frames)",
+            "description": "Cuanto se mantiene el clic ayudado en el robot. Mas = salto mas alto.",
+            "default": 8,
+            "min": 2,
+            "max": 20,
             "control": { "slider": true }
         }
     }
