@@ -15,6 +15,12 @@
         "geode.node-ids": ">=v1.23.3"
     },
     "settings": {
+        "assist-enabled": {
+            "type": "bool",
+            "name": "Activar ayuda",
+            "description": "Enciende o apaga la ayuda de precision.",
+            "default": true
+        },
         "buffer-frames": {
             "type": "int",
             "name": "Ayuda (frames)",
