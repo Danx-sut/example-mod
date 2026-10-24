@@ -8,7 +8,7 @@
     },
     "id": "danxsut.precision",
     "name": "Precision",
-    "version": "v1.1.0",
+    "version": "v1.2.0",
     "developer": "Danx-sut",
     "description": "Ayuda de precision para clics",
     "dependencies": {
@@ -46,6 +46,39 @@
             "default": 8,
             "min": 2,
             "max": 20,
+            "control": { "slider": true }
+        },
+        "bloom-enabled": {
+            "type": "bool",
+            "name": "Efecto Bloom (experimental)",
+            "description": "Brillo tipo RTX. Gasta FPS y bateria.",
+            "default": false
+        },
+        "bloom-strength": {
+            "type": "float",
+            "name": "Bloom: fuerza",
+            "description": "Cuanto brilla el resplandor.",
+            "default": 0.6,
+            "min": 0.0,
+            "max": 2.0,
+            "control": { "slider": true }
+        },
+        "bloom-threshold": {
+            "type": "float",
+            "name": "Bloom: umbral",
+            "description": "Mas bajo = brillan mas cosas. Mas alto = solo lo mas claro.",
+            "default": 0.6,
+            "min": 0.2,
+            "max": 0.95,
+            "control": { "slider": true }
+        },
+        "bloom-radius": {
+            "type": "int",
+            "name": "Bloom: tamano",
+            "description": "Que tan grande es el resplandor.",
+            "default": 6,
+            "min": 1,
+            "max": 14,
             "control": { "slider": true }
         }
     }
