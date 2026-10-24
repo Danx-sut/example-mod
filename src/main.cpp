@@ -57,9 +57,10 @@ class $modify(PrecisionLayer, GJBaseGameLayer) {
                 m_fields->clickedSinceGround = true;
             } else if (mod->getSettingValue<bool>("assist-enabled")
                        && needsAssist(m_player1)) {
-                double late = static_cast<double>(mod->getSettingValue<int64_t>("late-ms"));
-                double ground = static_cast<double>(mod->getSettingValue<int64_t>("ground-ms"));
-                double orb = static_cast<double>(mod->getSettingValue<int64_t>("orb-ms"));
+                double power = static_cast<double>(mod->getSettingValue<int64_t>("assist-power")) / 100.0;
+double late = static_cast<double>(mod->getSettingValue<int64_t>("late-ms")) * power;
+double ground = static_cast<double>(mod->getSettingValue<int64_t>("ground-ms")) * power;
+double orb = static_cast<double>(mod->getSettingValue<int64_t>("orb-ms")) * power;
 
                 bool lateOk = late > 0.0
                     && m_fields->wasInAir
