@@ -28,7 +28,8 @@ class $modify(PrecisionLayer, GJBaseGameLayer) {
         bool pending = false;
         bool fingerDown = false;
         bool replaying = false;
-        int framesLeft = 0;
+        int groundLeft = 0;
+        int orbLeft = 0;
         int releaseIn = 0;
     };
 
@@ -36,12 +37,16 @@ class $modify(PrecisionLayer, GJBaseGameLayer) {
         bool mine = button == 1 && isPlayer1 && !m_fields->replaying;
         if (mine) m_fields->fingerDown = down;
 
-        auto max = Mod::get()->getSettingValue<int64_t>("buffer-frames");
-        bool on = Mod::get()->getSettingValue<bool>("assist-enabled");
-        if (mine && down && on && max > 0 && m_player1
+        auto mod = Mod::get();
+        int ground = static_cast<int>(mod->getSettingValue<int64_t>("ground-frames"));
+        int orb = static_cast<int>(mod->getSettingValue<int64_t>("orb-frames"));
+        bool on = mod->getSettingValue<bool>("assist-enabled");
+
+        if (mine && down && on && (ground > 0 || orb > 0) && m_player1
             && needsAssist(m_player1) && !canActNow(m_player1)) {
             m_fields->pending = true;
-            m_fields->framesLeft = static_cast<int>(max);
+            m_fields->groundLeft = ground;
+            m_fields->orbLeft = orb;
         }
         GJBaseGameLayer::handleButton(down, button, isPlayer1);
     }
@@ -63,18 +68,27 @@ class $modify(PrecisionLayer, GJBaseGameLayer) {
             return;
         }
 
-        if (canActNow(m_player1)) {
+        bool hitGround = m_fields->groundLeft > 0 && m_player1->m_isOnGround;
+        bool hitOrb = m_fields->orbLeft > 0 && touchingRing(m_player1);
+
+        if (hitGround || hitOrb) {
             m_fields->pending = false;
             if (!m_fields->fingerDown) {
                 m_fields->replaying = true;
                 GJBaseGameLayer::handleButton(true, 1, true);
                 m_fields->replaying = false;
                 g_assistUsed = true;
-                // el robot salta mas alto si se mantiene mas tiempo
-                m_fields->releaseIn = m_player1->m_isRobot ? 8 : 2;
+                int robotHold = static_cast<int>(
+                    Mod::get()->getSettingValue<int64_t>("robot-hold-frames")
+                );
+                m_fields->releaseIn = m_player1->m_isRobot ? robotHold : 2;
             }
-        } else if (--m_fields->framesLeft <= 0) {
-            m_fields->pending = false;
+        } else {
+            if (m_fields->groundLeft > 0) m_fields->groundLeft--;
+            if (m_fields->orbLeft > 0) m_fields->orbLeft--;
+            if (m_fields->groundLeft <= 0 && m_fields->orbLeft <= 0) {
+                m_fields->pending = false;
+            }
         }
     }
 };
