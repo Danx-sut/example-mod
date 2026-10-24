@@ -4,10 +4,17 @@
 #include <Geode/modify/PlayLayer.hpp>
 #include <Geode/modify/GJGameLevel.hpp>
 #include <Geode/ui/GeodeUI.hpp>
+#include <chrono>
 using namespace geode::prelude;
 
-// Se pone en true cuando la ayuda aplica un clic en este intento
+// Se pone en true cuando la ayuda actua en este intento
 static bool g_assistUsed = false;
+
+static double nowMs() {
+    return std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now().time_since_epoch()
+    ).count();
+}
 
 // Cubo, bola, robot y arana necesitan ayuda; nave, UFO, onda y swing no
 static bool needsAssist(PlayerObject* p) {
@@ -28,48 +35,99 @@ class $modify(PrecisionLayer, GJBaseGameLayer) {
         bool pending = false;
         bool fingerDown = false;
         bool replaying = false;
-        int groundLeft = 0;
-        int orbLeft = 0;
-        int releaseIn = 0;
+        bool forceGround = false;
+        bool wasInAir = false;
+        bool clickedSinceGround = false;
+        double groundUntil = 0.0;
+        double orbUntil = 0.0;
+        double releaseAt = 0.0;
+        double leftGroundAt = 0.0;
     };
 
     void handleButton(bool down, int button, bool isPlayer1) {
         bool mine = button == 1 && isPlayer1 && !m_fields->replaying;
         if (mine) m_fields->fingerDown = down;
 
-        auto mod = Mod::get();
-        int ground = static_cast<int>(mod->getSettingValue<int64_t>("ground-frames"));
-        int orb = static_cast<int>(mod->getSettingValue<int64_t>("orb-frames"));
-        bool on = mod->getSettingValue<bool>("assist-enabled");
+        if (mine && down && m_player1) {
+            auto mod = Mod::get();
+            double t = nowMs();
 
-        if (mine && down && on && (ground > 0 || orb > 0) && m_player1
-            && needsAssist(m_player1) && !canActNow(m_player1)) {
-            m_fields->pending = true;
-            m_fields->groundLeft = ground;
-            m_fields->orbLeft = orb;
+            if (canActNow(m_player1)) {
+                // clic normal: ya salto, no hay correccion tardia
+                m_fields->clickedSinceGround = true;
+            } else if (mod->getSettingValue<bool>("assist-enabled")
+                       && needsAssist(m_player1)) {
+                double late = static_cast<double>(mod->getSettingValue<int64_t>("late-ms"));
+                double ground = static_cast<double>(mod->getSettingValue<int64_t>("ground-ms"));
+                double orb = static_cast<double>(mod->getSettingValue<int64_t>("orb-ms"));
+
+                bool lateOk = late > 0.0
+                    && m_fields->wasInAir
+                    && !m_fields->clickedSinceGround
+                    && (t - m_fields->leftGroundAt) <= late;
+
+                if (lateOk) {
+                    // clic tardio: se aplica el salto como si siguieras en el suelo
+                    m_fields->forceGround = true;
+                    m_fields->clickedSinceGround = true;
+                    g_assistUsed = true;
+                } else if (ground > 0.0 || orb > 0.0) {
+                    // clic temprano: se guarda unos ms
+                    m_fields->pending = true;
+                    m_fields->groundUntil = t + ground;
+                    m_fields->orbUntil = t + orb;
+                }
+            }
         }
         GJBaseGameLayer::handleButton(down, button, isPlayer1);
     }
 
     void processCommands(float dt, bool isHalfTick, bool isLastTick) {
-        GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
+        bool forced = m_fields->forceGround && m_player1;
+        if (forced) m_player1->m_isOnGround = true;
 
-        if (m_fields->releaseIn > 0 && --m_fields->releaseIn == 0 && !m_fields->fingerDown) {
-            m_fields->replaying = true;
-            GJBaseGameLayer::handleButton(false, 1, true);
-            m_fields->replaying = false;
+        GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
+        m_fields->forceGround = false;
+        if (!m_player1) return;
+
+        double t = nowMs();
+        auto mod = Mod::get();
+        bool on = mod->getSettingValue<bool>("assist-enabled");
+
+        // seguimiento del suelo / aire
+        if (forced) {
+            m_fields->wasInAir = true;
+            m_fields->clickedSinceGround = true;
+        } else if (m_player1->m_isOnGround) {
+            if (m_fields->wasInAir) m_fields->clickedSinceGround = false;
+            m_fields->wasInAir = false;
+        } else if (!m_fields->wasInAir) {
+            m_fields->wasInAir = true;
+            m_fields->leftGroundAt = t;
+            // si saltaste por mantener el dedo, no cuenta como caida de plataforma
+            if (m_fields->fingerDown) m_fields->clickedSinceGround = true;
         }
 
-        if (!m_fields->pending || !m_player1) return;
+        // soltar el clic ayudado
+        if (m_fields->releaseAt > 0.0 && t >= m_fields->releaseAt) {
+            m_fields->releaseAt = 0.0;
+            if (!m_fields->fingerDown) {
+                m_fields->replaying = true;
+                GJBaseGameLayer::handleButton(false, 1, true);
+                m_fields->replaying = false;
+            }
+        }
 
-        if (!Mod::get()->getSettingValue<bool>("assist-enabled")
-            || !needsAssist(m_player1)) {
+        // clic temprano guardado
+        if (!m_fields->pending) return;
+
+        if (!on || !needsAssist(m_player1)) {
             m_fields->pending = false;
             return;
         }
 
-        bool hitGround = m_fields->groundLeft > 0 && m_player1->m_isOnGround;
-        bool hitOrb = m_fields->orbLeft > 0 && touchingRing(m_player1);
+        bool hitGround = t <= m_fields->groundUntil && m_player1->m_isOnGround;
+        bool hitOrb = t <= m_fields->orbUntil && touchingRing(m_player1);
 
         if (hitGround || hitOrb) {
             m_fields->pending = false;
@@ -77,18 +135,15 @@ class $modify(PrecisionLayer, GJBaseGameLayer) {
                 m_fields->replaying = true;
                 GJBaseGameLayer::handleButton(true, 1, true);
                 m_fields->replaying = false;
+                m_fields->clickedSinceGround = true;
                 g_assistUsed = true;
-                int robotHold = static_cast<int>(
-                    Mod::get()->getSettingValue<int64_t>("robot-hold-frames")
+                double robotHold = static_cast<double>(
+                    mod->getSettingValue<int64_t>("robot-hold-ms")
                 );
-                m_fields->releaseIn = m_player1->m_isRobot ? robotHold : 2;
+                m_fields->releaseAt = t + (m_player1->m_isRobot ? robotHold : 30.0);
             }
-        } else {
-            if (m_fields->groundLeft > 0) m_fields->groundLeft--;
-            if (m_fields->orbLeft > 0) m_fields->orbLeft--;
-            if (m_fields->groundLeft <= 0 && m_fields->orbLeft <= 0) {
-                m_fields->pending = false;
-            }
+        } else if (t > m_fields->groundUntil && t > m_fields->orbUntil) {
+            m_fields->pending = false;
         }
     }
 };
