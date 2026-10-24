@@ -1,8 +1,13 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
 #include <Geode/modify/PauseLayer.hpp>
+#include <Geode/modify/PlayLayer.hpp>
+#include <Geode/modify/GJGameLevel.hpp>
 #include <Geode/ui/GeodeUI.hpp>
 using namespace geode::prelude;
+
+// Se pone en true cuando la ayuda aplica un clic en este intento
+static bool g_assistUsed = false;
 
 // Cubo, bola, robot y arana necesitan ayuda; nave, UFO, onda y swing no
 static bool needsAssist(PlayerObject* p) {
@@ -64,12 +69,35 @@ class $modify(PrecisionLayer, GJBaseGameLayer) {
                 m_fields->replaying = true;
                 GJBaseGameLayer::handleButton(true, 1, true);
                 m_fields->replaying = false;
+                g_assistUsed = true;
                 // el robot salta mas alto si se mantiene mas tiempo
                 m_fields->releaseIn = m_player1->m_isRobot ? 8 : 2;
             }
         } else if (--m_fields->framesLeft <= 0) {
             m_fields->pending = false;
         }
+    }
+};
+
+// Cada intento nuevo empieza sin marca de ayuda
+class $modify(PrecisionPlay, PlayLayer) {
+    void resetLevel() {
+        PlayLayer::resetLevel();
+        g_assistUsed = false;
+    }
+};
+
+// Si se uso la ayuda, no se guarda el progreso normal (la practica si)
+class $modify(PrecisionLevel, GJGameLevel) {
+    void savePercentage(int percent, bool isPracticeMode, int clicks, int attempts, bool isChkValid) {
+        if (g_assistUsed && !isPracticeMode) {
+            Notification::create(
+                "Precision: progreso no guardado (ayuda usada)",
+                NotificationIcon::Warning, 3.f
+            )->show();
+            return;
+        }
+        GJGameLevel::savePercentage(percent, isPracticeMode, clicks, attempts, isChkValid);
     }
 };
 
