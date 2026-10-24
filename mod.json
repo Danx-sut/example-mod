@@ -8,7 +8,7 @@
     },
     "id": "danxsut.precision",
     "name": "Precision",
-    "version": "v1.2.0",
+    "version": "v1.3.0",
     "developer": "Danx-sut",
     "description": "Ayuda de precision para clics",
     "dependencies": {
@@ -21,31 +21,40 @@
             "description": "Enciende o apaga la ayuda de precision.",
             "default": true
         },
-        "ground-frames": {
+        "ground-ms": {
             "type": "int",
-            "name": "Ayuda en suelo (frames)",
-            "description": "Cuantos frames antes de aterrizar cuenta tu clic. 0 = sin ayuda.",
-            "default": 3,
+            "name": "Clic temprano en suelo (ms)",
+            "description": "Cuantos milisegundos antes de aterrizar cuenta tu clic. 0 = sin ayuda.",
+            "default": 50,
             "min": 0,
-            "max": 10,
+            "max": 150,
             "control": { "slider": true }
         },
-        "orb-frames": {
+        "orb-ms": {
             "type": "int",
-            "name": "Ayuda en orbes (frames)",
-            "description": "Cuantos frames antes de tocar un orbe cuenta tu clic. 0 = sin ayuda.",
-            "default": 3,
+            "name": "Clic temprano en orbes (ms)",
+            "description": "Cuantos milisegundos antes de tocar un orbe cuenta tu clic. 0 = sin ayuda.",
+            "default": 50,
             "min": 0,
-            "max": 10,
+            "max": 150,
             "control": { "slider": true }
         },
-        "robot-hold-frames": {
+        "late-ms": {
             "type": "int",
-            "name": "Clic del robot (frames)",
+            "name": "Clic tardio (ms)",
+            "description": "Cuantos milisegundos despues de dejar una plataforma aun cuenta tu salto. 0 = apagado.",
+            "default": 33,
+            "min": 0,
+            "max": 100,
+            "control": { "slider": true }
+        },
+        "robot-hold-ms": {
+            "type": "int",
+            "name": "Clic del robot (ms)",
             "description": "Cuanto se mantiene el clic ayudado en el robot. Mas = salto mas alto.",
-            "default": 8,
-            "min": 2,
-            "max": 20,
+            "default": 100,
+            "min": 20,
+            "max": 400,
             "control": { "slider": true }
         },
         "bloom-enabled": {
