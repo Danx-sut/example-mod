@@ -179,10 +179,58 @@ public:
     }
 };
 
+// Texto pequeno en una esquina que dice si la ayuda esta activa
+class IndicatorNode : public CCNode {
+    CCLabelBMFont* m_label = nullptr;
+    int m_state = -1;
+
+public:
+    static IndicatorNode* create() {
+        auto ret = new IndicatorNode();
+        if (ret && ret->init()) {
+            ret->autorelease();
+            return ret;
+        }
+        CC_SAFE_DELETE(ret);
+        return nullptr;
+    }
+
+    bool init() override {
+        if (!CCNode::init()) return false;
+        m_label = CCLabelBMFont::create("Precision: ON", "bigFont.fnt");
+        m_label->setScale(0.3f);
+        m_label->setAnchorPoint({0.f, 1.f});
+        auto winSize = CCDirector::get()->getWinSize();
+        m_label->setPosition({8.f, winSize.height - 6.f});
+        this->addChild(m_label);
+        this->scheduleUpdate();
+        return true;
+    }
+
+    void update(float) override {
+        auto mod = Mod::get();
+        bool show = mod->getSavedValue<bool>("show-indicator", true);
+        bool on = mod->getSettingValue<bool>("assist-enabled");
+        int state = !show ? 0 : (on ? 1 : 2);
+        if (state == m_state) return;
+        m_state = state;
+
+        m_label->setVisible(state != 0);
+        if (state == 1) {
+            m_label->setString("Precision: ON");
+            m_label->setColor({120, 255, 140});
+        } else if (state == 2) {
+            m_label->setString("Precision: OFF");
+            m_label->setColor({200, 200, 200});
+        }
+        m_label->setOpacity(160);
+    }
+};
+
 class $modify(BloomPlayLayer, PlayLayer) {
     void setupHasCompleted() {
         PlayLayer::setupHasCompleted();
-        auto node = BloomNode::create();
-        if (node) this->addChild(node, 100000);
+        if (auto bloom = BloomNode::create()) this->addChild(bloom, 100000);
+        if (auto indicator = IndicatorNode::create()) this->addChild(indicator, 100001);
     }
 };
