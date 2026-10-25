@@ -3,15 +3,116 @@
 #include <Geode/modify/PauseLayer.hpp>
 #include <Geode/modify/PlayLayer.hpp>
 #include <Geode/modify/GJGameLevel.hpp>
+#include <Geode/utils/file.hpp>
 #include <chrono>
+#include <filesystem>
+#include <sstream>
+#include <string>
+#include <vector>
 using namespace geode::prelude;
 
 // Definida en menu.cpp
 void openPrecisionMenu();
 
-// Se pone en true cuando la ayuda actua en este intento
+// Se pone en true cuando la ayuda o una macro actua en este intento
 static bool g_assistUsed = false;
 
+// ---------- Macros ----------
+struct MacroEvent {
+    int step;
+    bool down;
+};
+
+static std::vector<MacroEvent> g_macro;
+static bool g_recording = false;    // el usuario activo Grabar
+static bool g_playing = false;      // el usuario activo Reproducir
+static bool g_recordActive = false; // grabando este intento (desde el reinicio)
+static bool g_playActive = false;   // reproduciendo este intento
+static size_t g_playIndex = 0;
+static int g_steps = 0;             // pasos de fisica desde el inicio del intento
+
+static std::filesystem::path macroPath() {
+    return Mod::get()->getSaveDir() / "macro.txt";
+}
+
+void macroSetRecording(bool on) {
+    g_recording = on;
+    g_recordActive = false;
+    if (on) {
+        g_playing = false;
+        g_playActive = false;
+        g_macro.clear();
+        Notification::create(
+            "Grabando: reinicia el nivel para empezar",
+            NotificationIcon::Success, 2.f
+        )->show();
+    }
+}
+
+void macroSetPlaying(bool on) {
+    if (on && g_macro.empty()) {
+        g_playing = false;
+        g_playActive = false;
+        Notification::create(
+            "No hay macro en memoria", NotificationIcon::Warning, 2.f
+        )->show();
+        return;
+    }
+    g_playing = on;
+    g_playActive = false;
+    g_playIndex = 0;
+    if (on) {
+        g_recording = false;
+        g_recordActive = false;
+        Notification::create(
+            "Reproduccion: reinicia el nivel para empezar",
+            NotificationIcon::Success, 2.f
+        )->show();
+    }
+}
+
+bool macroIsRecording() { return g_recording; }
+bool macroIsPlaying() { return g_playing; }
+int macroEventCount() { return static_cast<int>(g_macro.size()); }
+
+std::string macroSave() {
+    std::string out = "# Precision macro v1\n# paso,accion\n";
+    for (auto const& e : g_macro) {
+        out += std::to_string(e.step);
+        out += e.down ? ",down\n" : ",up\n";
+    }
+    auto res = geode::utils::file::writeString(macroPath(), out);
+    if (res.isErr()) {
+        return std::string("No se pudo guardar: ") + res.unwrapErr();
+    }
+    return std::string("Macro guardada en:\n") + macroPath().string();
+}
+
+std::string macroLoad() {
+    auto res = geode::utils::file::readString(macroPath());
+    if (res.isErr()) {
+        return "Todavia no hay una macro guardada.";
+    }
+    std::vector<MacroEvent> loaded;
+    std::istringstream in(res.unwrap());
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        auto comma = line.find(',');
+        if (comma == std::string::npos) continue;
+        int step = std::atoi(line.substr(0, comma).c_str());
+        std::string action = line.substr(comma + 1);
+        while (!action.empty() && (action.back() == '\r' || action.back() == ' ')) {
+            action.pop_back();
+        }
+        if (action == "down") loaded.push_back(MacroEvent{step, true});
+        else if (action == "up") loaded.push_back(MacroEvent{step, false});
+    }
+    g_macro = loaded;
+    return std::string("Macro cargada: ") + std::to_string(loaded.size()) + " acciones.";
+}
+
+// ---------- Utilidades ----------
 static double nowMs() {
     return std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now().time_since_epoch()
@@ -39,6 +140,7 @@ static bool canActNow(PlayerObject* p) {
     return p->m_isOnGround || touchingRing(p);
 }
 
+// ---------- Ayuda de clics, macros y velocidad ----------
 class $modify(PrecisionLayer, GJBaseGameLayer) {
     struct Fields {
         bool pending = false;
@@ -53,19 +155,39 @@ class $modify(PrecisionLayer, GJBaseGameLayer) {
         double leftGroundAt = 0.0;
     };
 
+    // Velocidad lenta solo en modo practica (nunca mas rapido de lo normal)
+    void update(float dt) {
+        auto pl = PlayLayer::get();
+        if (pl && pl->m_isPracticeMode) {
+            double speed = Mod::get()->getSavedValue<double>("practice-speed", 1.0);
+            if (speed < 1.0 && speed > 0.05) {
+                dt = static_cast<float>(dt * speed);
+            }
+        }
+        GJBaseGameLayer::update(dt);
+    }
+
     void handleButton(bool down, int button, bool isPlayer1) {
         bool mine = button == 1 && isPlayer1 && !m_fields->replaying;
-        if (mine) m_fields->fingerDown = down;
+
+        // durante una macro se ignoran tus clics
+        if (mine && g_playActive) return;
+
+        if (mine) {
+            m_fields->fingerDown = down;
+            if (g_recordActive) g_macro.push_back(MacroEvent{g_steps, down});
+        }
 
         if (mine && down && m_player1) {
             auto mod = Mod::get();
             double t = nowMs();
+            bool assistOn = mod->getSettingValue<bool>("assist-enabled")
+                && !g_recording && !g_playing;
 
             if (canActNow(m_player1)) {
                 // clic normal: ya salto, no hay correccion tardia
                 m_fields->clickedSinceGround = true;
-            } else if (mod->getSettingValue<bool>("assist-enabled")
-                       && needsAssist(m_player1)) {
+            } else if (assistOn && needsAssist(m_player1)) {
                 double power = static_cast<double>(
                     mod->getSettingValue<int64_t>("assist-power")
                 ) / 100.0;
@@ -96,16 +218,30 @@ class $modify(PrecisionLayer, GJBaseGameLayer) {
     }
 
     void processCommands(float dt, bool isHalfTick, bool isLastTick) {
+        // reproducir macro: se aplican los clics de este paso
+        if (g_playActive) {
+            while (g_playIndex < g_macro.size() && g_macro[g_playIndex].step <= g_steps) {
+                bool down = g_macro[g_playIndex].down;
+                g_playIndex++;
+                m_fields->replaying = true;
+                GJBaseGameLayer::handleButton(down, 1, true);
+                m_fields->replaying = false;
+                g_assistUsed = true;
+            }
+        }
+
         bool forced = m_fields->forceGround && m_player1;
         if (forced) m_player1->m_isOnGround = true;
 
         GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
+        g_steps++;
         m_fields->forceGround = false;
         if (!m_player1) return;
 
         double t = nowMs();
         auto mod = Mod::get();
-        bool on = mod->getSettingValue<bool>("assist-enabled");
+        bool on = mod->getSettingValue<bool>("assist-enabled")
+            && !g_recording && !g_playing;
 
         // seguimiento del suelo / aire
         if (forced) {
@@ -162,15 +298,27 @@ class $modify(PrecisionLayer, GJBaseGameLayer) {
     }
 };
 
-// Cada intento nuevo empieza sin marca de ayuda
+// ---------- Reinicio de intento y fin de nivel ----------
 class $modify(PrecisionPlay, PlayLayer) {
     void resetLevel() {
         PlayLayer::resetLevel();
         g_assistUsed = false;
+        g_steps = 0;
+        g_playIndex = 0;
+        g_recordActive = g_recording;
+        g_playActive = g_playing && !g_macro.empty();
+        if (g_recordActive) g_macro.clear();
+    }
+
+    void levelComplete() {
+        PlayLayer::levelComplete();
+        if (g_recordActive && !g_macro.empty()) {
+            Notification::create(macroSave(), NotificationIcon::Success, 4.f)->show();
+        }
     }
 };
 
-// Si se uso la ayuda, no se guarda el progreso normal (la practica si)
+// ---------- No guardar progreso si se uso ayuda ----------
 class $modify(PrecisionLevel, GJGameLevel) {
     void savePercentage(int percent, bool isPracticeMode, int clicks, int attempts, bool isChkValid) {
         if (g_assistUsed && !isPracticeMode) {
@@ -184,7 +332,7 @@ class $modify(PrecisionLevel, GJGameLevel) {
     }
 };
 
-// Boton en el menu de pausa que abre el menu de Precision
+// ---------- Boton en el menu de pausa ----------
 class $modify(PrecisionPause, PauseLayer) {
     void customSetup() {
         PauseLayer::customSetup();
