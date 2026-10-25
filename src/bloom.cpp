@@ -1,6 +1,11 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PlayLayer.hpp>
+#include <string>
 using namespace geode::prelude;
+
+// Definidas en main.cpp
+bool macroIsRecording();
+bool macroIsPlaying();
 
 static const char* kVert = R"(
 attribute vec2 a_pos;
@@ -179,7 +184,7 @@ public:
     }
 };
 
-// Texto pequeno en una esquina que dice si la ayuda esta activa
+// Texto pequeno en una esquina: estado de la ayuda y de las macros
 class IndicatorNode : public CCNode {
     CCLabelBMFont* m_label = nullptr;
     int m_state = -1;
@@ -211,18 +216,26 @@ public:
         auto mod = Mod::get();
         bool show = mod->getSavedValue<bool>("show-indicator", true);
         bool on = mod->getSettingValue<bool>("assist-enabled");
-        int state = !show ? 0 : (on ? 1 : 2);
+        bool rec = macroIsRecording();
+        bool play = macroIsPlaying();
+        int state = !show ? 0 : (1 + (on ? 1 : 0) + (rec ? 2 : 0) + (play ? 4 : 0));
         if (state == m_state) return;
         m_state = state;
 
         m_label->setVisible(state != 0);
-        if (state == 1) {
-            m_label->setString("Precision: ON");
-            m_label->setColor({120, 255, 140});
-        } else if (state == 2) {
-            m_label->setString("Precision: OFF");
-            m_label->setColor({200, 200, 200});
+        if (state == 0) return;
+
+        std::string text = on ? "Precision: ON" : "Precision: OFF";
+        ccColor3B color = on ? ccc3(120, 255, 140) : ccc3(200, 200, 200);
+        if (rec) {
+            text += "  REC";
+            color = ccc3(255, 90, 90);
+        } else if (play) {
+            text += "  PLAY";
+            color = ccc3(255, 220, 90);
         }
+        m_label->setString(text.c_str());
+        m_label->setColor(color);
         m_label->setOpacity(160);
     }
 };
