@@ -1,64 +1,183 @@
 #include <Geode/Geode.hpp>
 #include <Geode/ui/Popup.hpp>
 #include <Geode/ui/GeodeUI.hpp>
+#include <string>
+#include <vector>
 using namespace geode::prelude;
+
+// Definidas en main.cpp
+void macroSetRecording(bool on);
+void macroSetPlaying(bool on);
+bool macroIsRecording();
+bool macroIsPlaying();
+int macroEventCount();
+std::string macroSave();
+std::string macroLoad();
+
+static const float kMenuScales[] = {0.7f, 0.85f, 1.0f, 1.15f};
+static const double kSpeeds[] = {1.0, 0.75, 0.5, 0.25};
+
+static std::string percentText(const char* prefix, double v) {
+    return std::string(prefix) + std::to_string(static_cast<int>(v * 100.0 + 0.5)) + "%";
+}
 
 class PrecisionMenu : public Popup {
 protected:
+    std::vector<CCNode*> m_pageNodes;
+    ButtonSprite* m_sizeSpr = nullptr;
+    ButtonSprite* m_speedSpr = nullptr;
+    ButtonSprite* m_recSpr = nullptr;
+    ButtonSprite* m_playSpr = nullptr;
+    CCLabelBMFont* m_countLbl = nullptr;
+
     bool init() {
         if (!Popup::init(300.f, 250.f)) return false;
         this->setTitle("Precision");
 
-        auto mod = Mod::get();
-        this->addRow("Ayuda de clics", 75.f, 1,
-                     mod->getSettingValue<bool>("assist-enabled"));
-        this->addRow("Bloom (visual)", 48.f, 2,
-                     mod->getSettingValue<bool>("bloom-enabled"));
-        this->addRow("Indicador en pantalla", 21.f, 4,
-                     mod->getSavedValue<bool>("show-indicator", true));
-        this->addRow("Avisos de ayuda", -6.f, 3,
-                     mod->getSavedValue<bool>("debug-toasts", false));
+        const char* names[4] = {"Ayuda", "Visual", "Practica", "Macros"};
+        for (int i = 0; i < 4; i++) {
+            auto spr = ButtonSprite::create(names[i]);
+            spr->setScale(0.45f);
+            auto btn = CCMenuItemSpriteExtra::create(
+                spr, this, menu_selector(PrecisionMenu::onTab)
+            );
+            btn->setTag(i);
+            m_buttonMenu->addChildAtPosition(
+                btn, Anchor::Center, {-105.f + i * 70.f, 82.f}
+            );
+        }
 
-        auto presets = CCLabelBMFont::create("Presets de ayuda", "bigFont.fnt");
-        presets->setScale(0.45f);
-        m_mainLayer->addChildAtPosition(presets, Anchor::Center, {0.f, -34.f});
-
-        this->addPreset("Suave", -108.f, 1);
-        this->addPreset("Normal", -38.f, 2);
-        this->addPreset("Fuerte", 34.f, 3);
-        this->addPreset("Prueba", 106.f, 4);
-
-        auto sprite = ButtonSprite::create("Mas ajustes");
-        sprite->setScale(0.7f);
-        auto btn = CCMenuItemSpriteExtra::create(
-            sprite, this, menu_selector(PrecisionMenu::onMore)
-        );
-        m_buttonMenu->addChildAtPosition(btn, Anchor::Center, {0.f, -98.f});
+        this->applyScale();
+        this->showPage(0);
         return true;
     }
 
-    void addRow(const char* text, float y, int tag, bool value) {
-        auto label = CCLabelBMFont::create(text, "bigFont.fnt");
-        label->setScale(0.5f);
-        label->setAnchorPoint({0.f, 0.5f});
-        m_mainLayer->addChildAtPosition(label, Anchor::Center, {-120.f, y});
+    // ----- ayudas para armar las paginas -----
+    void track(CCNode* n) { m_pageNodes.push_back(n); }
 
+    CCLabelBMFont* addLabel(const char* text, float x, float y, float scale, bool left) {
+        auto label = CCLabelBMFont::create(text, "bigFont.fnt");
+        label->setScale(scale);
+        if (left) label->setAnchorPoint({0.f, 0.5f});
+        m_mainLayer->addChildAtPosition(label, Anchor::Center, {x, y});
+        this->track(label);
+        return label;
+    }
+
+    ButtonSprite* addButton(const char* text, float x, float y, int tag,
+                            SEL_MenuHandler cb, float scale) {
+        auto spr = ButtonSprite::create(text);
+        spr->setScale(scale);
+        auto btn = CCMenuItemSpriteExtra::create(spr, this, cb);
+        btn->setTag(tag);
+        m_buttonMenu->addChildAtPosition(btn, Anchor::Center, {x, y});
+        this->track(btn);
+        return spr;
+    }
+
+    void addToggleRow(const char* text, float y, int tag, bool value) {
+        this->addLabel(text, -120.f, y, 0.5f, true);
         auto toggler = CCMenuItemToggler::createWithStandardSprites(
             this, menu_selector(PrecisionMenu::onToggle), 0.7f
         );
         toggler->setTag(tag);
         toggler->toggle(value);
         m_buttonMenu->addChildAtPosition(toggler, Anchor::Center, {100.f, y});
+        this->track(toggler);
     }
 
-    void addPreset(const char* text, float x, int tag) {
-        auto sprite = ButtonSprite::create(text);
-        sprite->setScale(0.5f);
-        auto btn = CCMenuItemSpriteExtra::create(
-            sprite, this, menu_selector(PrecisionMenu::onPreset)
-        );
-        btn->setTag(tag);
-        m_buttonMenu->addChildAtPosition(btn, Anchor::Center, {x, -62.f});
+    int speedIndex() {
+        int i = static_cast<int>(Mod::get()->getSavedValue<int64_t>("practice-speed-idx", 0));
+        return (i < 0 || i > 3) ? 0 : i;
+    }
+
+    int sizeIndex() {
+        int i = static_cast<int>(Mod::get()->getSavedValue<int64_t>("menu-scale-idx", 2));
+        return (i < 0 || i > 3) ? 2 : i;
+    }
+
+    void applyScale() {
+        m_mainLayer->setScale(kMenuScales[this->sizeIndex()]);
+    }
+
+    void refreshMacro() {
+        if (m_recSpr) {
+            m_recSpr->setString(macroIsRecording() ? "Grabar: ON" : "Grabar: OFF");
+        }
+        if (m_playSpr) {
+            m_playSpr->setString(macroIsPlaying() ? "Reproducir: ON" : "Reproducir: OFF");
+        }
+        if (m_countLbl) {
+            m_countLbl->setString(
+                (std::string("Acciones en memoria: ")
+                 + std::to_string(macroEventCount())).c_str()
+            );
+        }
+    }
+
+    // ----- paginas -----
+    void showPage(int p) {
+        for (auto n : m_pageNodes) n->removeFromParent();
+        m_pageNodes.clear();
+        m_sizeSpr = nullptr;
+        m_speedSpr = nullptr;
+        m_recSpr = nullptr;
+        m_playSpr = nullptr;
+        m_countLbl = nullptr;
+
+        auto mod = Mod::get();
+
+        if (p == 0) {
+            this->addToggleRow("Ayuda de clics", 45.f, 1,
+                               mod->getSettingValue<bool>("assist-enabled"));
+            this->addToggleRow("Avisos de ayuda", 20.f, 3,
+                               mod->getSavedValue<bool>("debug-toasts", false));
+            this->addLabel("Presets de ayuda", 0.f, -2.f, 0.45f, false);
+            this->addButton("Suave", -108.f, -26.f, 1, menu_selector(PrecisionMenu::onPreset), 0.5f);
+            this->addButton("Normal", -38.f, -26.f, 2, menu_selector(PrecisionMenu::onPreset), 0.5f);
+            this->addButton("Fuerte", 34.f, -26.f, 3, menu_selector(PrecisionMenu::onPreset), 0.5f);
+            this->addButton("Prueba", 106.f, -26.f, 4, menu_selector(PrecisionMenu::onPreset), 0.5f);
+            this->addButton("Guardar mio", -60.f, -60.f, 1, menu_selector(PrecisionMenu::onCustom), 0.5f);
+            this->addButton("Cargar mio", 60.f, -60.f, 2, menu_selector(PrecisionMenu::onCustom), 0.5f);
+            this->addButton("Mas ajustes", 0.f, -95.f, 0, menu_selector(PrecisionMenu::onMore), 0.7f);
+        } else if (p == 1) {
+            this->addToggleRow("Bloom (visual)", 45.f, 2,
+                               mod->getSettingValue<bool>("bloom-enabled"));
+            this->addToggleRow("Indicador en pantalla", 20.f, 4,
+                               mod->getSavedValue<bool>("show-indicator", true));
+            m_sizeSpr = this->addButton(
+                percentText("Tamano del menu: ", kMenuScales[this->sizeIndex()]).c_str(),
+                0.f, -15.f, 0, menu_selector(PrecisionMenu::onSize), 0.6f
+            );
+        } else if (p == 2) {
+            m_speedSpr = this->addButton(
+                percentText("Velocidad: ", kSpeeds[this->speedIndex()]).c_str(),
+                0.f, 30.f, 0, menu_selector(PrecisionMenu::onSpeed), 0.7f
+            );
+            this->addLabel("Solo funciona en modo practica", 0.f, -5.f, 0.4f, false);
+        } else {
+            m_recSpr = this->addButton(
+                macroIsRecording() ? "Grabar: ON" : "Grabar: OFF",
+                0.f, 48.f, 0, menu_selector(PrecisionMenu::onRecord), 0.7f
+            );
+            m_playSpr = this->addButton(
+                macroIsPlaying() ? "Reproducir: ON" : "Reproducir: OFF",
+                0.f, 14.f, 0, menu_selector(PrecisionMenu::onPlay), 0.7f
+            );
+            this->addButton("Guardar", -60.f, -22.f, 0, menu_selector(PrecisionMenu::onMacroSave), 0.6f);
+            this->addButton("Cargar", 60.f, -22.f, 0, menu_selector(PrecisionMenu::onMacroLoad), 0.6f);
+            m_countLbl = this->addLabel(
+                (std::string("Acciones en memoria: ")
+                 + std::to_string(macroEventCount())).c_str(),
+                0.f, -52.f, 0.4f, false
+            );
+            this->addLabel("Graba desde el inicio del nivel", 0.f, -72.f, 0.35f, false);
+        }
+    }
+
+    // ----- botones -----
+    void onTab(CCObject* sender) {
+        this->showPage(static_cast<CCNode*>(sender)->getTag());
     }
 
     void onToggle(CCObject* sender) {
@@ -100,9 +219,75 @@ protected:
         mod->setSettingValue<int64_t>("robot-hold-ms", robot);
 
         Notification::create(
-            std::string("Preset: ") + name,
-            NotificationIcon::Success, 1.f
+            std::string("Preset: ") + name, NotificationIcon::Success, 1.f
         )->show();
+    }
+
+    void onCustom(CCObject* sender) {
+        int tag = static_cast<CCNode*>(sender)->getTag();
+        auto mod = Mod::get();
+        if (tag == 1) {
+            mod->setSavedValue<int64_t>("custom-power", mod->getSettingValue<int64_t>("assist-power"));
+            mod->setSavedValue<int64_t>("custom-ground", mod->getSettingValue<int64_t>("ground-ms"));
+            mod->setSavedValue<int64_t>("custom-orb", mod->getSettingValue<int64_t>("orb-ms"));
+            mod->setSavedValue<int64_t>("custom-late", mod->getSettingValue<int64_t>("late-ms"));
+            mod->setSavedValue<int64_t>("custom-robot", mod->getSettingValue<int64_t>("robot-hold-ms"));
+            mod->setSavedValue<bool>("custom-saved", true);
+            Notification::create("Preset propio guardado", NotificationIcon::Success, 1.f)->show();
+        } else {
+            if (!mod->getSavedValue<bool>("custom-saved", false)) {
+                Notification::create("Aun no guardaste un preset propio", NotificationIcon::Warning, 1.5f)->show();
+                return;
+            }
+            mod->setSettingValue<int64_t>("assist-power", mod->getSavedValue<int64_t>("custom-power", 100));
+            mod->setSettingValue<int64_t>("ground-ms", mod->getSavedValue<int64_t>("custom-ground", 50));
+            mod->setSettingValue<int64_t>("orb-ms", mod->getSavedValue<int64_t>("custom-orb", 50));
+            mod->setSettingValue<int64_t>("late-ms", mod->getSavedValue<int64_t>("custom-late", 33));
+            mod->setSettingValue<int64_t>("robot-hold-ms", mod->getSavedValue<int64_t>("custom-robot", 100));
+            Notification::create("Preset propio cargado", NotificationIcon::Success, 1.f)->show();
+        }
+    }
+
+    void onSize(CCObject*) {
+        int i = (this->sizeIndex() + 1) % 4;
+        Mod::get()->setSavedValue<int64_t>("menu-scale-idx", i);
+        this->applyScale();
+        if (m_sizeSpr) {
+            m_sizeSpr->setString(percentText("Tamano del menu: ", kMenuScales[i]).c_str());
+        }
+    }
+
+    void onSpeed(CCObject*) {
+        int i = (this->speedIndex() + 1) % 4;
+        Mod::get()->setSavedValue<int64_t>("practice-speed-idx", i);
+        Mod::get()->setSavedValue<double>("practice-speed", kSpeeds[i]);
+        if (m_speedSpr) {
+            m_speedSpr->setString(percentText("Velocidad: ", kSpeeds[i]).c_str());
+        }
+    }
+
+    void onRecord(CCObject*) {
+        macroSetRecording(!macroIsRecording());
+        this->refreshMacro();
+    }
+
+    void onPlay(CCObject*) {
+        macroSetPlaying(!macroIsPlaying());
+        this->refreshMacro();
+    }
+
+    void onMacroSave(CCObject*) {
+        if (macroEventCount() == 0) {
+            FLAlertLayer::create("Macro", "No hay nada que guardar todavia.", "OK")->show();
+            return;
+        }
+        FLAlertLayer::create("Macro", macroSave(), "OK")->show();
+    }
+
+    void onMacroLoad(CCObject*) {
+        std::string msg = macroLoad();
+        this->refreshMacro();
+        FLAlertLayer::create("Macro", msg, "OK")->show();
     }
 
     void onMore(CCObject*) {
