@@ -1,6 +1,7 @@
 #include <Geode/Geode.hpp>
 #include <Geode/ui/Popup.hpp>
 #include <Geode/ui/GeodeUI.hpp>
+#include <algorithm>
 #include <string>
 #include <vector>
 using namespace geode::prelude;
@@ -17,6 +18,24 @@ std::string macroLoad();
 static const float kMenuScales[] = {0.7f, 0.85f, 1.0f, 1.15f};
 static const double kSpeeds[] = {1.0, 0.75, 0.5, 0.25};
 
+// Etapas de ayuda 1..7 (la 8 es "sin ayuda"), en milisegundos
+struct Stage {
+    int64_t ground;
+    int64_t orb;
+    int64_t late;
+    int64_t robot;
+};
+
+static const Stage kStages[7] = {
+    {15, 15, 8, 60},
+    {30, 30, 16, 80},
+    {50, 50, 33, 100},
+    {70, 70, 45, 110},
+    {90, 90, 60, 120},
+    {120, 120, 80, 130},
+    {150, 150, 100, 150},
+};
+
 static std::string percentText(const char* prefix, double v) {
     return std::string(prefix) + std::to_string(static_cast<int>(v * 100.0 + 0.5)) + "%";
 }
@@ -29,6 +48,9 @@ protected:
     ButtonSprite* m_recSpr = nullptr;
     ButtonSprite* m_playSpr = nullptr;
     CCLabelBMFont* m_countLbl = nullptr;
+    CCMenuItemToggler* m_assistToggler = nullptr;
+    CCLabelBMFont* m_stageLbl = nullptr;
+    CCLabelBMFont* m_stageInfo = nullptr;
 
     bool init() {
         if (!Popup::init(300.f, 250.f)) return false;
@@ -75,7 +97,7 @@ protected:
         return spr;
     }
 
-    void addToggleRow(const char* text, float y, int tag, bool value) {
+    CCMenuItemToggler* addToggleRow(const char* text, float y, int tag, bool value) {
         this->addLabel(text, -120.f, y, 0.5f, true);
         auto toggler = CCMenuItemToggler::createWithStandardSprites(
             this, menu_selector(PrecisionMenu::onToggle), 0.7f
@@ -84,6 +106,7 @@ protected:
         toggler->toggle(value);
         m_buttonMenu->addChildAtPosition(toggler, Anchor::Center, {100.f, y});
         this->track(toggler);
+        return toggler;
     }
 
     int speedIndex() {
@@ -98,6 +121,67 @@ protected:
 
     void applyScale() {
         m_mainLayer->setScale(kMenuScales[this->sizeIndex()]);
+    }
+
+    // ----- etapas de ayuda -----
+    // 1..7 = etapa, 8 = sin ayuda, 0 = valores propios
+    int currentStage() {
+        auto mod = Mod::get();
+        if (!mod->getSettingValue<bool>("assist-enabled")) return 8;
+        if (mod->getSettingValue<int64_t>("assist-power") != 100) return 0;
+        int64_t g = mod->getSettingValue<int64_t>("ground-ms");
+        int64_t o = mod->getSettingValue<int64_t>("orb-ms");
+        int64_t l = mod->getSettingValue<int64_t>("late-ms");
+        int64_t r = mod->getSettingValue<int64_t>("robot-hold-ms");
+        for (int i = 0; i < 7; i++) {
+            if (kStages[i].ground == g && kStages[i].orb == o
+                && kStages[i].late == l && kStages[i].robot == r) {
+                return i + 1;
+            }
+        }
+        return 0;
+    }
+
+    void applyStage(int s) {
+        auto mod = Mod::get();
+        if (s >= 8) {
+            mod->setSettingValue<bool>("assist-enabled", false);
+            return;
+        }
+        auto const& st = kStages[s - 1];
+        mod->setSettingValue<bool>("assist-enabled", true);
+        mod->setSettingValue<int64_t>("assist-power", 100);
+        mod->setSettingValue<int64_t>("ground-ms", st.ground);
+        mod->setSettingValue<int64_t>("orb-ms", st.orb);
+        mod->setSettingValue<int64_t>("late-ms", st.late);
+        mod->setSettingValue<int64_t>("robot-hold-ms", st.robot);
+    }
+
+    void refreshStage(bool syncToggle) {
+        int s = this->currentStage();
+
+        if (syncToggle && m_assistToggler) {
+            m_assistToggler->toggle(Mod::get()->getSettingValue<bool>("assist-enabled"));
+        }
+
+        if (m_stageLbl) {
+            std::string txt = s == 8 ? "OFF" : (s == 0 ? "Propia" : std::to_string(s) + "/7");
+            m_stageLbl->setString(txt.c_str());
+        }
+        if (m_stageInfo) {
+            std::string info;
+            if (s >= 1 && s <= 7) {
+                auto const& st = kStages[s - 1];
+                info = "Suelo " + std::to_string(st.ground)
+                     + " ms | Orbes " + std::to_string(st.orb)
+                     + " ms | Tardio " + std::to_string(st.late) + " ms";
+            } else if (s == 8) {
+                info = "Sin ayuda";
+            } else {
+                info = "Valores propios (ver Mas ajustes)";
+            }
+            m_stageInfo->setString(info.c_str());
+        }
     }
 
     void refreshMacro() {
@@ -124,21 +208,29 @@ protected:
         m_recSpr = nullptr;
         m_playSpr = nullptr;
         m_countLbl = nullptr;
+        m_assistToggler = nullptr;
+        m_stageLbl = nullptr;
+        m_stageInfo = nullptr;
 
         auto mod = Mod::get();
 
         if (p == 0) {
-            this->addToggleRow("Ayuda de clics", 45.f, 1,
-                               mod->getSettingValue<bool>("assist-enabled"));
-            this->addToggleRow("Avisos de ayuda", 20.f, 3,
+            m_assistToggler = this->addToggleRow(
+                "Ayuda de clics", 50.f, 1, mod->getSettingValue<bool>("assist-enabled")
+            );
+            this->addToggleRow("Avisos de ayuda", 24.f, 3,
                                mod->getSavedValue<bool>("debug-toasts", false));
-            this->addLabel("Presets de ayuda", 0.f, -2.f, 0.45f, false);
-            this->addButton("Suave", -108.f, -26.f, 1, menu_selector(PrecisionMenu::onPreset), 0.5f);
-            this->addButton("Normal", -38.f, -26.f, 2, menu_selector(PrecisionMenu::onPreset), 0.5f);
-            this->addButton("Fuerte", 34.f, -26.f, 3, menu_selector(PrecisionMenu::onPreset), 0.5f);
-            this->addButton("Prueba", 106.f, -26.f, 4, menu_selector(PrecisionMenu::onPreset), 0.5f);
-            this->addButton("Guardar mio", -60.f, -60.f, 1, menu_selector(PrecisionMenu::onCustom), 0.5f);
-            this->addButton("Cargar mio", 60.f, -60.f, 2, menu_selector(PrecisionMenu::onCustom), 0.5f);
+
+            this->addLabel("Etapa", -120.f, -4.f, 0.5f, true);
+            this->addButton("-", 30.f, -4.f, -1, menu_selector(PrecisionMenu::onStage), 0.5f);
+            m_stageLbl = this->addLabel("", 70.f, -4.f, 0.5f, false);
+            this->addButton("+", 110.f, -4.f, 1, menu_selector(PrecisionMenu::onStage), 0.5f);
+            m_stageInfo = this->addLabel("", 0.f, -28.f, 0.35f, false);
+            this->refreshStage(false);
+
+            this->addButton("Guardar mio", -100.f, -58.f, 1, menu_selector(PrecisionMenu::onCustom), 0.5f);
+            this->addButton("Cargar mio", 0.f, -58.f, 2, menu_selector(PrecisionMenu::onCustom), 0.5f);
+            this->addButton("Prueba", 100.f, -58.f, 0, menu_selector(PrecisionMenu::onTest), 0.5f);
             this->addButton("Mas ajustes", 0.f, -95.f, 0, menu_selector(PrecisionMenu::onMore), 0.7f);
         } else if (p == 1) {
             this->addToggleRow("Bloom (visual)", 45.f, 2,
@@ -184,42 +276,36 @@ protected:
         auto toggler = static_cast<CCMenuItemToggler*>(sender);
         bool on = !toggler->isToggled();
         switch (toggler->getTag()) {
-            case 1: Mod::get()->setSettingValue<bool>("assist-enabled", on); break;
+            case 1:
+                Mod::get()->setSettingValue<bool>("assist-enabled", on);
+                this->refreshStage(false);
+                break;
             case 2: Mod::get()->setSettingValue<bool>("bloom-enabled", on); break;
             case 3: Mod::get()->setSavedValue<bool>("debug-toasts", on); break;
             case 4: Mod::get()->setSavedValue<bool>("show-indicator", on); break;
         }
     }
 
-    void onPreset(CCObject* sender) {
-        int tag = static_cast<CCNode*>(sender)->getTag();
-        int64_t power = 100, ground = 50, orb = 50, late = 33, robot = 100;
-        const char* name = "Normal";
-        switch (tag) {
-            case 1:
-                ground = 30; orb = 30; late = 16; robot = 80;
-                name = "Suave";
-                break;
-            case 2:
-                break;
-            case 3:
-                ground = 90; orb = 90; late = 60; robot = 120;
-                name = "Fuerte";
-                break;
-            case 4:
-                power = 300; ground = 150; orb = 150; late = 100; robot = 150;
-                name = "Prueba";
-                break;
-        }
-        auto mod = Mod::get();
-        mod->setSettingValue<int64_t>("assist-power", power);
-        mod->setSettingValue<int64_t>("ground-ms", ground);
-        mod->setSettingValue<int64_t>("orb-ms", orb);
-        mod->setSettingValue<int64_t>("late-ms", late);
-        mod->setSettingValue<int64_t>("robot-hold-ms", robot);
+    void onStage(CCObject* sender) {
+        int dir = static_cast<CCNode*>(sender)->getTag();
+        int s = this->currentStage();
+        if (s == 0) s = 3; // desde valores propios se parte de la etapa 3
+        s = std::max(1, std::min(8, s + dir));
+        this->applyStage(s);
+        this->refreshStage(true);
+    }
 
+    void onTest(CCObject*) {
+        auto mod = Mod::get();
+        mod->setSettingValue<bool>("assist-enabled", true);
+        mod->setSettingValue<int64_t>("assist-power", 300);
+        mod->setSettingValue<int64_t>("ground-ms", 150);
+        mod->setSettingValue<int64_t>("orb-ms", 150);
+        mod->setSettingValue<int64_t>("late-ms", 100);
+        mod->setSettingValue<int64_t>("robot-hold-ms", 150);
+        this->refreshStage(true);
         Notification::create(
-            std::string("Preset: ") + name, NotificationIcon::Success, 1.f
+            "Prueba: ventanas al maximo", NotificationIcon::Success, 1.f
         )->show();
     }
 
@@ -244,6 +330,7 @@ protected:
             mod->setSettingValue<int64_t>("orb-ms", mod->getSavedValue<int64_t>("custom-orb", 50));
             mod->setSettingValue<int64_t>("late-ms", mod->getSavedValue<int64_t>("custom-late", 33));
             mod->setSettingValue<int64_t>("robot-hold-ms", mod->getSavedValue<int64_t>("custom-robot", 100));
+            this->refreshStage(true);
             Notification::create("Preset propio cargado", NotificationIcon::Success, 1.f)->show();
         }
     }
