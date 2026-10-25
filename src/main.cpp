@@ -186,6 +186,7 @@ class $modify(PrecisionLayer, GJBaseGameLayer) {
 
             if (canActNow(m_player1)) {
                 // clic normal: ya salto, no hay correccion tardia
+                debugToast("Clic normal");
                 m_fields->clickedSinceGround = true;
             } else if (assistOn && needsAssist(m_player1)) {
                 double power = static_cast<double>(
@@ -209,6 +210,7 @@ class $modify(PrecisionLayer, GJBaseGameLayer) {
                 } else if (ground > 0.0 || orb > 0.0) {
                     // clic temprano: se guarda unos ms
                     m_fields->pending = true;
+                    debugToast("Clic en el aire: guardado");
                     m_fields->groundUntil = t + ground;
                     m_fields->orbUntil = t + orb;
                 }
@@ -279,6 +281,7 @@ class $modify(PrecisionLayer, GJBaseGameLayer) {
         bool hitOrb = t <= m_fields->orbUntil && touchingRing(m_player1);
 
         if (hitGround || hitOrb) {
+            if (m_fields->fingerDown) debugToast("No aplicado: dedo abajo");
             m_fields->pending = false;
             if (!m_fields->fingerDown) {
                 m_fields->replaying = true;
@@ -293,6 +296,7 @@ class $modify(PrecisionLayer, GJBaseGameLayer) {
                 m_fields->releaseAt = t + (m_player1->m_isRobot ? robotHold : 30.0);
             }
         } else if (t > m_fields->groundUntil && t > m_fields->orbUntil) {
+            debugToast("Vencio antes de aterrizar");
             m_fields->pending = false;
         }
     }
